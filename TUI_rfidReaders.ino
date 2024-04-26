@@ -8,9 +8,9 @@
 #include <iostream>
 
 #define RST_PIN         32          // Configurable, see typical pin layout above
-#define SS_1_PIN        13          // Configurable, take a unused pin, only HIGH/LOW required, must be different to SS 2
+#define SS_1_PIN        14          // Configurable, take a unused pin, only HIGH/LOW required, must be different to SS 2
 #define SS_2_PIN        12          // Configurable, take a unused pin, only HIGH/LOW required, must be different to SS 1
-#define SS_3_PIN        14 
+#define SS_3_PIN        13 
 
 #define NR_OF_READERS   3
 
@@ -59,7 +59,7 @@ void setup() {
   // }
 
   for (uint8_t reader = 0; reader < NR_OF_READERS; reader++) {
-    mfrc522[reader].PCD_Init(ssPins[reader], RST_PIN); // Init each MFRC522 card
+    mfrc522[reader].PCD_Init(ssPins[reader], MFRC522::UNUSED_PIN); // Init each MFRC522 card
     Serial.print(F("Reader "));
     Serial.print(reader);
     Serial.print(F(": "));
@@ -94,7 +94,7 @@ void loop() {
   for (int reader = 0; reader < NR_OF_READERS; reader++) {
 
   if(!mfrc522[reader].PICC_IsNewCardPresent()) {
-    positionCharacteristic.setValue(reader);
+    //positionCharacteristic.setValue(reader);
     cardCharacteristic.setValue(new byte[0], 0);
 
   } else if (mfrc522[reader].PICC_ReadCardSerial()) {
