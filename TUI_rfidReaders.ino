@@ -50,7 +50,7 @@ void setup() {
 
   SPI.begin(); // Init SPI bus
 
-  //rfid.PCD_Init(); // Init MFRC522 
+  rfid.PCD_Init(); // Init MFRC522 !!!!!!!!!!!
   Serial.println("Starting BLE");
   Serial.println();
 
