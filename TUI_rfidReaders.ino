@@ -18,6 +18,9 @@ byte ssPins[] = {SS_1_PIN, SS_2_PIN, SS_3_PIN};
 
 MFRC522 mfrc522[NR_OF_READERS];   // Create MFRC522 instance.
 
+String state[NR_OF_READERS];
+String lastState[NR_OF_READERS];
+
 //MFRC522::MIFARE_Key key; 
 
 // new NUID 
@@ -93,60 +96,49 @@ void loop() {
   for (int reader = 0; reader < NR_OF_READERS; reader++) {
 
   if(!mfrc522[reader].PICC_IsNewCardPresent()) {
-    //positionCharacteristic.setValue(reader);
     cardCharacteristic.setValue(new byte[0], 0);
 
   } else if (mfrc522[reader].PICC_ReadCardSerial()) {
-      //Serial.print(mfrc522[reader].PICC_ReadCardSerial());
       Serial.print(F("Reader "));
       Serial.print(reader);
       positionCharacteristic.setValue(reader);
-      //positionCharacteristic.notify();
 
-      // Show some details of the PICC (that is: the tag/card)
-      //Serial.print(F("PICC type: "));
       MFRC522::PICC_Type piccType = mfrc522[reader].PICC_GetType(mfrc522[reader].uid.sak);
       
       Serial.print(F(": Card UID:"));
       printDec(mfrc522[reader].uid.uidByte, mfrc522[reader].uid.size);
       Serial.println();
-      
-      //Serial.println(mfrc522[reader].PICC_GetTypeName(piccType));
+
+      state[reader] = "";
+
+      //WRITE TO STATE
+      for (byte i = 0; i < mfrc522[reader].uid.size; i++) {
+        state[reader] += String(mfrc522[reader].uid.uidByte[i], DEC);
+        if (i < mfrc522[reader].uid.size - 1) {
+          state[reader] += " ";
+        }
+      }
 
       cardCharacteristic.setValue(mfrc522[reader].uid.uidByte, mfrc522[reader].uid.size);
-      //cardCharacteristic.notify(); 
       Serial.println();
 
-      //Serial.println(mfrc522[reader].PICC_ReadCardSerial());
-
-      // Halt PICC
       mfrc522[reader].PICC_HaltA();
-      // Stop encryption on PCD
       mfrc522[reader].PCD_StopCrypto1();
+
+        Serial.println("State array:");
+        for (int reader = 0; reader < NR_OF_READERS; reader++) {
+        Serial.print("Reader ");
+        Serial.print(reader);
+        Serial.print(": ");
+        Serial.println(state[reader]);
     }
-
-
-
+    }
     //pollPres(reader);
     
   }
-  delay(30);
+
 }
 
-
-/**
- * Helper routine to dump a byte array as hex values to Serial. 
- */
-void printHex(byte *buffer, byte bufferSize) {
-  for (byte i = 0; i < bufferSize; i++) {
-    Serial.print(buffer[i] < 0x10 ? " 0" : " ");
-    Serial.print(buffer[i], HEX);
-  }
-}
-
-/**
- * Helper routine to dump a byte array as dec values to Serial.
- */
 void printDec(byte *buffer, byte bufferSize) {
   for (byte i = 0; i < bufferSize; i++) {
     Serial.print(' ');
@@ -162,25 +154,18 @@ void pollPres(int reader){
   mfrc522[reader].PCD_WriteRegister(mfrc522[reader].RxModeReg, 0x00);
   mfrc522[reader].PCD_WriteRegister(mfrc522[reader].ModWidthReg, 0x26);
 
+   
    if(mfrc522[reader].PICC_WakeupA(bufferATQA, &bufferSize)){
-    //  Serial.print(reader);
-    //  Serial.print(": ");
-    //  printDec(mfrc522[reader].uid.uidByte, mfrc522[reader].uid.size);
-    //  Serial.print(" Still here"); // works the otehr way around?
-    //  Serial.println();
-
-
-
-    //   // A halted card has responded to WUPA therefore our card is still there
-
-    //   mfrc522[reader].PICC_HaltA();
+     if (mfrc522[reader].uid.size != 0) {
+      Serial.print(reader);
+      Serial.print(": ");
+      printDec(mfrc522[reader].uid.uidByte, mfrc522[reader].uid.size);
+      Serial.print(" LEFT"); // WRITE TO CHAR
+      Serial.println();
+     }
    }
    else{
-      // No response to WUPA our card must have left
-      Serial.print(reader);
-     Serial.print(": ");
-     printDec(mfrc522[reader].uid.uidByte, mfrc522[reader].uid.size);
-     Serial.print(" left");
-     Serial.println();
+      // DO NOTHING
    }
+   mfrc522[reader].PICC_HaltA();   
 }
