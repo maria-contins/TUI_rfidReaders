@@ -7,27 +7,24 @@
 #include <string>
 #include <iostream>
 
-#define RST_PIN         32          // Configurable, see typical pin layout above
-#define SS_1_PIN        14          // Configurable, take a unused pin, only HIGH/LOW required, must be different to SS 2
-#define SS_2_PIN        12          // Configurable, take a unused pin, only HIGH/LOW required, must be different to SS 1
+#define RST_PIN         32
+#define SS_1_PIN        14
+#define SS_2_PIN        12
 #define SS_3_PIN        13 
 
 #define NR_OF_READERS   3
 
 byte ssPins[] = {SS_1_PIN, SS_2_PIN, SS_3_PIN};
 
-MFRC522 mfrc522[NR_OF_READERS];   // Create MFRC522 instance.
+MFRC522 mfrc522[NR_OF_READERS];
 
 String state[NR_OF_READERS];
 String lastState[NR_OF_READERS];
-
-//MFRC522::MIFARE_Key key; 
 
 // new NUID 
 byte nuidPICC[4];
 
 // https://www.uuidgenerator.net/
-
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 
 BLECharacteristic cardCharacteristic("b481757e-6e97-4ea4-862b-5a651dc7db82", BLECharacteristic::PROPERTY_NOTIFY|BLECharacteristic::PROPERTY_READ|BLECharacteristic::PROPERTY_WRITE);
@@ -51,17 +48,13 @@ class MyServerCallbacks: public BLEServerCallbacks {
 void setup() {
   Serial.begin(115200);
 
-  SPI.begin(); // Init SPI bus
+  SPI.begin();
 
   Serial.println("Starting BLE");
   Serial.println();
 
-  // for (byte i = 0; i < 6; i++) {
-  //   key.keyByte[i] = 0xFF;
-  // }
-
   for (uint8_t reader = 0; reader < NR_OF_READERS; reader++) {
-    mfrc522[reader].PCD_Init(ssPins[reader], MFRC522::UNUSED_PIN); // Init each MFRC522 card
+    mfrc522[reader].PCD_Init(ssPins[reader], MFRC522::UNUSED_PIN);
     Serial.print(F("Reader "));
     Serial.print(reader);
     Serial.print(F(": "));
@@ -82,11 +75,10 @@ void setup() {
 
   pServer->setCallbacks(new MyServerCallbacks());
   pService->start();
-  // BLEAdvertising *pAdvertising = pServer->getAdvertising();  // this still is working for backward compatibility
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
+  pAdvertising->setMinPreferred(0x06);
   pAdvertising->setMinPreferred(0x12);
   BLEDevice::startAdvertising();
   Serial.println("Characteristic defined");
