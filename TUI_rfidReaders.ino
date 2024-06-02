@@ -74,8 +74,7 @@ void setup() {
 void loop() {
   for (int reader = 0; reader < NR_OF_READERS; reader++) {
     if(!mfrc522[reader].PICC_IsNewCardPresent()) {
-      // If no card is present, set state to empty string
-      state[reader] = "";
+      // If no card is present
     } else if (mfrc522[reader].PICC_ReadCardSerial()) {
       Serial.print(F("Reader "));
       Serial.print(reader);
@@ -86,14 +85,25 @@ void loop() {
       printDec(mfrc522[reader].uid.uidByte, mfrc522[reader].uid.size);
       Serial.println();
 
-      // Clear state for this reader
-      state[reader] = "";
+      // Check if the UID is already present in the state array
+      bool uidPresent = false;
+      String currentUID = "";
+      for (int i = 0; i < NR_OF_READERS; i++) {
+        if (state[i] == "") continue; // Skip empty states
+        if (state[i] == currentUID) {
+          uidPresent = true;
+          break;
+        }
+      }
 
-      //WRITE TO STATE
-      for (byte i = 0; i < mfrc522[reader].uid.size; i++) {
-        state[reader] += String(mfrc522[reader].uid.uidByte[i], DEC);
-        if (i < mfrc522[reader].uid.size - 1) {
-          state[reader] += " ";
+      if (!uidPresent) {
+        // If UID is not present in any other reader's state, update the state for this reader
+        state[reader] = "";
+        for (byte i = 0; i < mfrc522[reader].uid.size; i++) {
+          state[reader] += String(mfrc522[reader].uid.uidByte[i], DEC);
+          if (i < mfrc522[reader].uid.size - 1) {
+            state[reader] += " ";
+          }
         }
       }
 
