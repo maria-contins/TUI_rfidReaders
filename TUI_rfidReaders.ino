@@ -4,6 +4,8 @@
 #include <BLE2902.h>
 #include <SPI.h>
 #include <MFRC522.h>
+#include <esp_now.h>
+#include <WiFi.h>
 
 #define RST_PIN         32
 #define SS_1_PIN        14
@@ -11,6 +13,20 @@
 #define SS_3_PIN        13 
 
 #define NR_OF_READERS   3
+
+// -----------------------ESP-NOW---------------------------------------------
+typedef struct struct_message {
+  int id;
+  String module[NR_OF_READERS];
+}struct_message;
+
+// Create a struct_message called myData
+struct_message myData;
+// Create a structure to hold the readings from each board
+struct_message board1;
+// Create an array with all the structures
+struct_message boardsStruct[1] = {board1};
+// -----------------------ESP-NOW---------------------------------------------
 
 byte ssPins[] = {SS_1_PIN, SS_2_PIN, SS_3_PIN};
 
@@ -36,8 +52,40 @@ class MyServerCallbacks: public BLEServerCallbacks {
   }
 };
 
+
+// -----------------------ESP-NOW---------------------------------------------
+// callback function that will be executed when data is received
+void OnDataRecv(const uint8_t * mac_addr, const uint8_t *incomingData, int len) {
+  char macStr[18];
+  Serial.print("Packet received from: ");
+  snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
+           mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+  Serial.println(macStr);
+  memcpy(&myData, incomingData, sizeof(myData));
+  Serial.printf("Board ID %u: %u bytes\n", myData.id, len);
+  // Update the structures with the new incoming data
+  for (int i = 0; i < NR_OF_READERS; i++) {
+    boardsStruct[myData.id-1].module[i] = myData.module[i];
+  }
+  Serial.printf("module value: %d \n", boardsStruct[myData.id-1].module);
+  Serial.println();
+}
+// -----------------------ESP-NOW---------------------------------------------
+
 void setup() {
+
+  
   Serial.begin(115200);
+
+  // -----------------------ESP-NOW---------------------------------------------
+  WiFi.mode(WIFI_STA);
+  //Init ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    //return;
+  }
+  esp_now_register_recv_cb(OnDataRecv);
+  // -----------------------ESP-NOW---------------------------------------------
 
   SPI.begin();
 
@@ -72,6 +120,8 @@ void setup() {
 }
 
 void loop() {
+  // Acess the variables for each board
+
   for (int reader = 0; reader < NR_OF_READERS; reader++) {
     if(!mfrc522[reader].PICC_IsNewCardPresent()) {
       // If no card is present
