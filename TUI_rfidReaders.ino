@@ -26,6 +26,8 @@ struct_message myData;
 struct_message board1;
 // Create an array with all the structures
 struct_message boardsStruct[1] = {board1};
+
+bool dataReceived = false;
 // -----------------------ESP-NOW---------------------------------------------
 
 byte ssPins[] = {SS_1_PIN, SS_2_PIN, SS_3_PIN};
@@ -69,6 +71,7 @@ void OnDataRecv(const uint8_t * mac_addr, const uint8_t *incomingData, int len) 
   }
   Serial.printf("module value: %d \n", boardsStruct[myData.id-1].module);
   Serial.println();
+  dataReceived = true;
 }
 // -----------------------ESP-NOW---------------------------------------------
 
@@ -119,54 +122,10 @@ void setup() {
   Serial.println("Characteristic defined");
 }
 
-void loop() {
-  // Acess the variables for each board
-
-  for (int reader = 0; reader < NR_OF_READERS; reader++) {
-    if(!mfrc522[reader].PICC_IsNewCardPresent()) {
-      // If no card is present
-    } else if (mfrc522[reader].PICC_ReadCardSerial()) {
-      Serial.print(F("Reader "));
-      Serial.print(reader);
-
-      MFRC522::PICC_Type piccType = mfrc522[reader].PICC_GetType(mfrc522[reader].uid.sak);
-      
-      Serial.print(F(": Card UID:"));
-      printDec(mfrc522[reader].uid.uidByte, mfrc522[reader].uid.size);
-      Serial.println();
-
-      // Check if the UID is already present in the state array
-      bool uidPresent = false;
-      String currentUID = "";
-      for (int i = 0; i < NR_OF_READERS; i++) {
-        if (state[i] == "") continue; // Skip empty states
-        if (state[i] == currentUID) {
-          uidPresent = true;
-          break;
-        }
-      }
-
-      if (!uidPresent) {
-        // If UID is not present in any other reader's state, update the state for this reader
-        state[reader] = "";
-        for (byte i = 0; i < mfrc522[reader].uid.size; i++) {
-          state[reader] += String(mfrc522[reader].uid.uidByte[i], DEC);
-          if (i < mfrc522[reader].uid.size - 1) {
-            state[reader] += " ";
-          }
-        }
-      }
-
-      // Set the stateCharacteristic value to the serialized state array
-      String serializedState = serializeStateArray();
-      stateCharacteristic.setValue(serializedState.c_str());
-
-      mfrc522[reader].PICC_HaltA();
-      mfrc522[reader].PCD_StopCrypto1();
-
-      // Print out the state array
-      printStateArray();
-    }
+void printDec(byte *buffer, byte bufferSize) {
+  for (byte i = 0; i < bufferSize; i++) {
+    Serial.print(' ');
+    Serial.print(buffer[i], DEC);
   }
 }
 
@@ -191,9 +150,80 @@ void printStateArray() {
   }
 }
 
-void printDec(byte *buffer, byte bufferSize) {
-  for (byte i = 0; i < bufferSize; i++) {
-    Serial.print(' ');
-    Serial.print(buffer[i], DEC);
+// Serialize myData.module array
+String serializeModuleArray() {
+  String serializedModule = "";
+  for (int i = 0; i < NR_OF_READERS; i++) {
+    serializedModule += myData.module[i];
+    if (i < NR_OF_READERS - 1) {
+      serializedModule += ",";
+    }
+  }
+  return serializedModule;
+}
+
+// Print myData.module array
+void printModuleArray() {
+  for (int reader = NR_OF_READERS; reader < NR_OF_READERS * 2; reader++) {
+    Serial.print("Reader ");
+    Serial.print(reader);
+    Serial.print(": ");
+    Serial.println(myData.module[reader - NR_OF_READERS]);
   }
 }
+
+void loop() {
+  // Acess the variables for each board
+
+  for (int reader = 0; reader < NR_OF_READERS; reader++) {
+    if(!mfrc522[reader].PICC_IsNewCardPresent()) {
+      // If no card is present
+    } else if (mfrc522[reader].PICC_ReadCardSerial()) {
+      Serial.print(F("Reader "));
+      Serial.print(reader);
+
+      MFRC522::PICC_Type piccType = mfrc522[reader].PICC_GetType(mfrc522[reader].uid.sak);
+      
+      Serial.print(F(": Card UID:"));
+      printDec(mfrc522[reader].uid.uidByte, mfrc522[reader].uid.size);
+      Serial.println();
+
+      // Check if the UID is already present in the state array
+      bool uidPresent = false;
+      String currentUID = ""; // Initialize to an empty string
+      for (int i = 0; i < NR_OF_READERS; i++) {
+        if (state[i] == "") continue;
+        currentUID = state[i];
+        if (currentUID == String(mfrc522[reader].uid.uidByte, DEC)) { // Compare with the current UID
+          uidPresent = true;
+          state[i] = "";
+          break;
+        }
+      }
+        state[reader] = "";
+        for (byte i = 0; i < mfrc522[reader].uid.size; i++) {
+          state[reader] += String(mfrc522[reader].uid.uidByte[i], DEC);
+          if (i < mfrc522[reader].uid.size - 1) {
+            state[reader] += " ";
+          }
+        }
+
+      // Set the stateCharacteristic value to the serialized state array
+      String serializedState = serializeStateArray();
+      String serializedModule = serializeModuleArray();
+      stateCharacteristic.setValue(serializedState.c_str());
+
+      mfrc522[reader].PICC_HaltA();
+      mfrc522[reader].PCD_StopCrypto1();
+
+      // Print out the state array
+      printStateArray();
+      // Print out the module array
+      printModuleArray();
+      }
+
+
+    }
+  }
+
+
