@@ -17,6 +17,7 @@
 // -----------------------ESP-NOW---------------------------------------------
 typedef struct struct_message {
   int id;
+  int nr_readers; // TODO MAY NOT BE NEEDED
   String module[NR_OF_READERS];
 }struct_message;
 
@@ -54,8 +55,25 @@ class MyServerCallbacks: public BLEServerCallbacks {
   }
 };
 
+
 // -----------------------ESP-NOW---------------------------------------------
 // callback function that will be executed when data is received
+void printStructMessage(const struct_message& msg) {
+  Serial.print("ID: ");
+  Serial.println(msg.id);
+
+  Serial.print("Number of Readers: ");
+  Serial.println(msg.nr_readers);
+
+  Serial.println("Modules:");
+  for (int i = 0; i < msg.nr_readers; i++) {
+    Serial.print("  Reader ");
+    Serial.print(i);
+    Serial.print(": ");
+    Serial.println(msg.module[i]);
+  }
+}
+
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
     char macStr[18];
     Serial.print("Packet received from: ");
@@ -63,21 +81,26 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
              mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
     Serial.println(macStr);
 
-    // Assuming myData structure is defined consistently in both sender and receiver
     struct_message receivedData;
-    memcpy(&receivedData, incomingData, sizeof(receivedData));
+    int offset = 0;
+    
+    memcpy(&receivedData.id, &incomingData[offset], sizeof(int));
+    offset += sizeof(int);
+
+    memcpy(&receivedData.nr_readers, &incomingData[offset], sizeof(int));
+    offset += sizeof(int);
+
+    for (int i = 0; i < receivedData.nr_readers; i++) {
+        size_t moduleLen = strlen((char*)&incomingData[offset]); 
+        receivedData.module[i] = String((char*)&incomingData[offset]); 
+        offset += moduleLen + 1;
+    }
 
     Serial.printf("Board ID %u: %u bytes\n", receivedData.id, len);
 
-    // Update the structures with the new incoming data
-    for (int i = 0; i < NR_OF_READERS; i++) {
-        boardsStruct[receivedData.id - 1].module[i] = receivedData.module[i];
-        Serial.println(receivedData.module[i].c_str());
-    }
-
+    // Print received data
+    printStructMessage(receivedData);
     Serial.println();
-    
-    dataReceived = true;
 }
 // -----------------------ESP-NOW---------------------------------------------
 
@@ -158,18 +181,6 @@ void printStateArray() {
   }
 }
 
-// Serialize myData.module array
-String serializeModuleArray() {
-  String serializedModule = "";
-  for (int i = 0; i < NR_OF_READERS; i++) {
-    serializedModule += myData.module[i];
-    if (i < NR_OF_READERS - 1) {
-      serializedModule += ",";
-    }
-  }
-  return serializedModule;
-}
-
 // Print myData.module array
 void printModuleArray() {
   for (int reader = NR_OF_READERS; reader < NR_OF_READERS * 2; reader++) {
@@ -214,9 +225,6 @@ void loop() {
             state[reader] += " ";
           }
         }
-
-      // TODO:
-      // if dataReceived 
 
       //Set the stateCharacteristic value to the serialized state array
       String serializedState = serializeStateArray();
