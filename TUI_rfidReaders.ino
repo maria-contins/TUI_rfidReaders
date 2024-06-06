@@ -12,7 +12,7 @@
 #define SS_2_PIN        12
 #define SS_3_PIN        13 
 
-#define NR_OF_READERS   3
+#define NR_OF_READERS   2
 
 // -----------------------ESP-NOW---------------------------------------------
 typedef struct struct_message {
@@ -30,7 +30,7 @@ struct_message boardsStruct[1] = {board1};
 bool dataReceived = false;
 // -----------------------ESP-NOW---------------------------------------------
 
-byte ssPins[] = {SS_1_PIN, SS_2_PIN, SS_3_PIN};
+byte ssPins[] = {SS_1_PIN, SS_2_PIN};
 
 MFRC522 mfrc522[NR_OF_READERS];
 
@@ -54,24 +54,30 @@ class MyServerCallbacks: public BLEServerCallbacks {
   }
 };
 
-
 // -----------------------ESP-NOW---------------------------------------------
 // callback function that will be executed when data is received
-void OnDataRecv(const uint8_t * mac_addr, const uint8_t *incomingData, int len) {
-  char macStr[18];
-  Serial.print("Packet received from: ");
-  snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
-           mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-  Serial.println(macStr);
-  memcpy(&myData, incomingData, sizeof(myData));
-  Serial.printf("Board ID %u: %u bytes\n", myData.id, len);
-  // Update the structures with the new incoming data
-  for (int i = 0; i < NR_OF_READERS; i++) {
-    boardsStruct[myData.id-1].module[i] = myData.module[i];
-  }
-  Serial.printf("module value: %d \n", boardsStruct[myData.id-1].module);
-  Serial.println();
-  dataReceived = true;
+void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
+    char macStr[18];
+    Serial.print("Packet received from: ");
+    snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
+             mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+    Serial.println(macStr);
+
+    // Assuming myData structure is defined consistently in both sender and receiver
+    struct_message receivedData;
+    memcpy(&receivedData, incomingData, sizeof(receivedData));
+
+    Serial.printf("Board ID %u: %u bytes\n", receivedData.id, len);
+
+    // Update the structures with the new incoming data
+    for (int i = 0; i < NR_OF_READERS; i++) {
+        boardsStruct[receivedData.id - 1].module[i] = receivedData.module[i];
+        Serial.println(receivedData.module[i].c_str());
+    }
+
+    Serial.println();
+    
+    dataReceived = true;
 }
 // -----------------------ESP-NOW---------------------------------------------
 
@@ -82,6 +88,8 @@ void setup() {
 
   // -----------------------ESP-NOW---------------------------------------------
   WiFi.mode(WIFI_STA);
+  WiFi.channel(1);
+
   //Init ESP-NOW
   if (esp_now_init() != ESP_OK) {
     Serial.println("Error initializing ESP-NOW");
@@ -173,19 +181,18 @@ void printModuleArray() {
 }
 
 void loop() {
-  // Acess the variables for each board
 
   for (int reader = 0; reader < NR_OF_READERS; reader++) {
     if(!mfrc522[reader].PICC_IsNewCardPresent()) {
       // If no card is present
     } else if (mfrc522[reader].PICC_ReadCardSerial()) {
-      Serial.print(F("Reader "));
-      Serial.print(reader);
+      //Serial.print(F("Reader "));
+      //Serial.print(reader);
 
       MFRC522::PICC_Type piccType = mfrc522[reader].PICC_GetType(mfrc522[reader].uid.sak);
       
-      Serial.print(F(": Card UID:"));
-      printDec(mfrc522[reader].uid.uidByte, mfrc522[reader].uid.size);
+      //Serial.print(F(": Card UID:"));
+      //printDec(mfrc522[reader].uid.uidByte, mfrc522[reader].uid.size);
       Serial.println();
 
       // Check if the UID is already present in the state array
@@ -208,9 +215,11 @@ void loop() {
           }
         }
 
-      // Set the stateCharacteristic value to the serialized state array
+      // TODO:
+      // if dataReceived 
+
+      //Set the stateCharacteristic value to the serialized state array
       String serializedState = serializeStateArray();
-      String serializedModule = serializeModuleArray();
       stateCharacteristic.setValue(serializedState.c_str());
 
       mfrc522[reader].PICC_HaltA();
@@ -218,11 +227,7 @@ void loop() {
 
       // Print out the state array
       printStateArray();
-      // Print out the module array
-      printModuleArray();
       }
-
-
     }
   }
 
