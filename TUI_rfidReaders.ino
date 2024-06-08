@@ -12,14 +12,15 @@
 #define SS_2_PIN        12
 #define SS_3_PIN        13 
 
-#define NR_OF_READERS   2
+#define NR_OF_READERS   1
+#define MODULE_SIZE     50  // Define the max size for the module char array
 
 // -----------------------ESP-NOW---------------------------------------------
 typedef struct struct_message {
   int id;
-  int nr_readers; // TODO MAY NOT BE NEEDED
-  String module[NR_OF_READERS];
-}struct_message;
+  int nr_readers;
+  char module[MODULE_SIZE];
+} struct_message;
 
 // Create a struct_message called myData
 struct_message myData;
@@ -31,7 +32,8 @@ struct_message boardsStruct[1] = {board1};
 bool dataReceived = false;
 // -----------------------ESP-NOW---------------------------------------------
 
-byte ssPins[] = {SS_1_PIN, SS_2_PIN};
+//byte ssPins[] = {SS_1_PIN, SS_2_PIN};
+byte ssPins[] = {SS_3_PIN};
 
 MFRC522 mfrc522[NR_OF_READERS];
 
@@ -55,7 +57,6 @@ class MyServerCallbacks: public BLEServerCallbacks {
   }
 };
 
-
 // -----------------------ESP-NOW---------------------------------------------
 // callback function that will be executed when data is received
 void printStructMessage(const struct_message& msg) {
@@ -65,13 +66,8 @@ void printStructMessage(const struct_message& msg) {
   Serial.print("Number of Readers: ");
   Serial.println(msg.nr_readers);
 
-  Serial.println("Modules:");
-  for (int i = 0; i < msg.nr_readers; i++) {
-    Serial.print("  Reader ");
-    Serial.print(i);
-    Serial.print(": ");
-    Serial.println(msg.module[i]);
-  }
+  Serial.print("Modules: ");
+  Serial.println(msg.module);
 }
 
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
@@ -81,32 +77,14 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
              mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
     Serial.println(macStr);
 
-    struct_message receivedData;
-    int offset = 0;
-    
-    memcpy(&receivedData.id, &incomingData[offset], sizeof(int));
-    offset += sizeof(int);
+    memcpy(&myData, incomingData, sizeof(myData));
 
-    memcpy(&receivedData.nr_readers, &incomingData[offset], sizeof(int));
-    offset += sizeof(int);
-
-    for (int i = 0; i < receivedData.nr_readers; i++) {
-        size_t moduleLen = strlen((char*)&incomingData[offset]); 
-        receivedData.module[i] = String((char*)&incomingData[offset]); 
-        offset += moduleLen + 1;
-    }
-
-    Serial.printf("Board ID %u: %u bytes\n", receivedData.id, len);
-
-    // Print received data
-    printStructMessage(receivedData);
-    Serial.println();
+    printStructMessage(myData);
 }
+
 // -----------------------ESP-NOW---------------------------------------------
 
 void setup() {
-
-  
   Serial.begin(115200);
 
   // -----------------------ESP-NOW---------------------------------------------
@@ -116,7 +94,7 @@ void setup() {
   //Init ESP-NOW
   if (esp_now_init() != ESP_OK) {
     Serial.println("Error initializing ESP-NOW");
-    //return;
+    return;
   }
   esp_now_register_recv_cb(OnDataRecv);
   // -----------------------ESP-NOW---------------------------------------------
@@ -160,15 +138,15 @@ void printDec(byte *buffer, byte bufferSize) {
   }
 }
 
-String serializeStateArray() {
-  String serializedState = "";
+void serializeStateArray(char *serializedState) {
+  String stateString = "";
   for (int i = 0; i < NR_OF_READERS; i++) {
-    serializedState += state[i];
+    stateString += state[i];
     if (i < NR_OF_READERS - 1) {
-      serializedState += ",";
+      stateString += ",";
     }
   }
-  return serializedState;
+  stateString.toCharArray(serializedState, MODULE_SIZE);
 }
 
 void printStateArray() {
@@ -181,29 +159,13 @@ void printStateArray() {
   }
 }
 
-// Print myData.module array
-void printModuleArray() {
-  for (int reader = NR_OF_READERS; reader < NR_OF_READERS * 2; reader++) {
-    Serial.print("Reader ");
-    Serial.print(reader);
-    Serial.print(": ");
-    Serial.println(myData.module[reader - NR_OF_READERS]);
-  }
-}
-
 void loop() {
-
   for (int reader = 0; reader < NR_OF_READERS; reader++) {
     if(!mfrc522[reader].PICC_IsNewCardPresent()) {
       // If no card is present
     } else if (mfrc522[reader].PICC_ReadCardSerial()) {
-      //Serial.print(F("Reader "));
-      //Serial.print(reader);
-
       MFRC522::PICC_Type piccType = mfrc522[reader].PICC_GetType(mfrc522[reader].uid.sak);
       
-      //Serial.print(F(": Card UID:"));
-      //printDec(mfrc522[reader].uid.uidByte, mfrc522[reader].uid.size);
       Serial.println();
 
       // Check if the UID is already present in the state array
@@ -218,25 +180,24 @@ void loop() {
           break;
         }
       }
-        state[reader] = "";
-        for (byte i = 0; i < mfrc522[reader].uid.size; i++) {
-          state[reader] += String(mfrc522[reader].uid.uidByte[i], DEC);
-          if (i < mfrc522[reader].uid.size - 1) {
-            state[reader] += " ";
-          }
+      state[reader] = "";
+      for (byte i = 0; i < mfrc522[reader].uid.size; i++) {
+        state[reader] += String(mfrc522[reader].uid.uidByte[i], DEC);
+        if (i < mfrc522[reader].uid.size - 1) {
+          state[reader] += " ";
         }
+      }
 
-      //Set the stateCharacteristic value to the serialized state array
-      String serializedState = serializeStateArray();
-      stateCharacteristic.setValue(serializedState.c_str());
+      // Set the stateCharacteristic value to the serialized state array
+      char serializedState[MODULE_SIZE];
+      serializeStateArray(serializedState);
+      stateCharacteristic.setValue(serializedState);
 
       mfrc522[reader].PICC_HaltA();
       mfrc522[reader].PCD_StopCrypto1();
 
       // Print out the state array
       printStateArray();
-      }
     }
   }
-
-
+}
