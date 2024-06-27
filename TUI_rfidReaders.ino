@@ -11,11 +11,20 @@
 #define SS_1_PIN        14
 #define SS_2_PIN        12
 #define SS_3_PIN        13 
-
+#define BUTTON_PIN      32
 #define NR_OF_READERS   1
-#define MODULE_SIZE     50  // Define the max size for the module char array
+#define MODULE_SIZE     50  // max size for the module char array
+#define ID              0 
+
+int buttonState;            // the current reading from the input pin
+int lastButtonState = LOW;
+unsigned long lastDebounceTime = 0;  // the last time the output pin was toggled
+unsigned long debounceDelay = 50;
 
 // -----------------------ESP-NOW---------------------------------------------
+// extra modules connected to receiver (self)
+int nr_modules = 1; // TODO change dinamically 
+
 typedef struct struct_message {
   int id;
   int nr_readers;
@@ -38,6 +47,7 @@ byte ssPins[] = {SS_3_PIN};
 MFRC522 mfrc522[NR_OF_READERS];
 
 String state[NR_OF_READERS];
+String *globalState;
 String lastState[NR_OF_READERS];
 
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
@@ -47,6 +57,7 @@ BLECharacteristic stateCharacteristic(STATE_CHAR_UUID, BLECharacteristic::PROPER
 BLEDescriptor stateDescriptor(BLEUUID((uint16_t)0x2902));
 
 bool deviceConnected = false;
+bool modulesDataReceived = false;
 
 class MyServerCallbacks: public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) {
@@ -80,12 +91,20 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
     memcpy(&myData, incomingData, sizeof(myData));
 
     printStructMessage(myData);
+    modulesDataReceived = true;
+
+    char serializedState[MODULE_SIZE];
+    serializeMessage(serializedState, myData);
+
+    stateCharacteristic.setValue(serializedState);
 }
 
 // -----------------------ESP-NOW---------------------------------------------
 
 void setup() {
   Serial.begin(115200);
+
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   // -----------------------ESP-NOW---------------------------------------------
   WiFi.mode(WIFI_STA);
@@ -97,6 +116,8 @@ void setup() {
     return;
   }
   esp_now_register_recv_cb(OnDataRecv);
+
+  globalState = new String[NR_OF_READERS*nr_modules];
   // -----------------------ESP-NOW---------------------------------------------
 
   SPI.begin();
@@ -138,16 +159,58 @@ void printDec(byte *buffer, byte bufferSize) {
   }
 }
 
+// void copyToGlobal() {
+//     for (uint8_t i = 0; i < NR_OF_READERS; i++) {
+//         globalState[i] = state[i];
+//     }
+
+//     int pos = myData.id * NR_OF_READERS;
+//     int endPos = pos + NR_OF_READERS;
+
+//     for (uint8_t i = pos, j = 0; i < endPos; i++, j++) {
+//         globalState[i] = String(myData.module).substring(j * MODULE_SIZE / NR_OF_READERS, (j + 1) * MODULE_SIZE / NR_OF_READERS);
+//     }
+// }
+
 void serializeStateArray(char *serializedState) {
   String stateString = "";
+  stateString += ID;
+  stateString += ",";
   for (int i = 0; i < NR_OF_READERS; i++) {
     stateString += state[i];
     if (i < NR_OF_READERS - 1) {
       stateString += ",";
     }
   }
+
+  if (buttonState == HIGH) {
+    stateString += ",1";
+  } else {
+    stateString += ",0";
+  }
+    
   stateString.toCharArray(serializedState, MODULE_SIZE);
 }
+
+void serializeMessage(char *serializedState, struct_message myData) {
+  String stateString = "";
+  stateString += myData.id;
+  stateString += ",";
+  stateString += myData.module;
+  stateString.toCharArray(serializedState, MODULE_SIZE);
+}
+
+void serializeGlobalStateArray(char *serializedGlobalState) {
+  String globalStateString = "";
+  for (int i = 0; i < NR_OF_READERS * nr_modules; i++) {
+    globalStateString += globalState[i];
+    if (i < (NR_OF_READERS * nr_modules) - 1) {
+      globalStateString += ",";
+    }
+  }
+  globalStateString.toCharArray(serializedGlobalState, MODULE_SIZE);
+}
+
 
 void printStateArray() {
   Serial.println("State array:");
@@ -160,12 +223,37 @@ void printStateArray() {
 }
 
 void loop() {
+
+  // read the state of the switch/button:
+  int reading = digitalRead(BUTTON_PIN);
+
+  // print out the button's state
+  if (reading != lastButtonState) {
+    lastDebounceTime = millis();
+  }    
+
+  if ((millis() - lastDebounceTime) > debounceDelay) {
+    if (reading != buttonState) {
+      buttonState = reading;        
+      if (buttonState == HIGH) {
+        Serial.println("submit!");
+
+        char serializedState[MODULE_SIZE];
+        serializeStateArray(serializedState);
+
+        stateCharacteristic.setValue(serializedState);
+      }         
+    }
+  }
+
+  lastButtonState = reading;
+
   for (int reader = 0; reader < NR_OF_READERS; reader++) {
     if(!mfrc522[reader].PICC_IsNewCardPresent()) {
       // If no card is present
     } else if (mfrc522[reader].PICC_ReadCardSerial()) {
+
       MFRC522::PICC_Type piccType = mfrc522[reader].PICC_GetType(mfrc522[reader].uid.sak);
-      
       Serial.println();
 
       // Check if the UID is already present in the state array
@@ -188,9 +276,9 @@ void loop() {
         }
       }
 
-      // Set the stateCharacteristic value to the serialized state array
       char serializedState[MODULE_SIZE];
       serializeStateArray(serializedState);
+
       stateCharacteristic.setValue(serializedState);
 
       mfrc522[reader].PICC_HaltA();
