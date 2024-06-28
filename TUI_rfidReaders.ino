@@ -23,7 +23,9 @@ unsigned long debounceDelay = 50;
 
 // -----------------------ESP-NOW---------------------------------------------
 // extra modules connected to receiver (self)
-int nr_modules = 1; // TODO change dinamically 
+int nr_modules = 3; // TODO change dinamically 
+
+bool removedCard;
 
 typedef struct struct_message {
   int id;
@@ -209,6 +211,40 @@ void printStateArray() {
   }
 }
 
+void pollPres(int reader) {
+  byte bufferATQA[2];
+  byte bufferSize = sizeof(bufferATQA);
+  
+  mfrc522[reader].PCD_WriteRegister(mfrc522[reader].TxModeReg, 0x00);
+  mfrc522[reader].PCD_WriteRegister(mfrc522[reader].RxModeReg, 0x00);
+  mfrc522[reader].PCD_WriteRegister(mfrc522[reader].ModWidthReg, 0x26);
+
+   
+   if(mfrc522[reader].PICC_WakeupA(bufferATQA, &bufferSize)){
+     if (mfrc522[reader].uid.size != 0) {
+      //Serial.print(reader);
+      //Serial.print(": ");
+      //printDec(mfrc522[reader].uid.uidByte, mfrc522[reader].uid.size);
+      //Serial.print(" LEFT"); // WRITE TO CHAR
+      //Serial.println();
+      if (state[reader] != "") {      
+        state[reader] = "";
+        
+        char serializedState[MODULE_SIZE];
+        serializeStateArray(serializedState);
+
+        stateCharacteristic.setValue(serializedState);
+
+        printStateArray();
+      }
+     }
+   }
+   else{
+      // DO NOTHING, card presnt
+   }
+   mfrc522[reader].PICC_HaltA();   
+}
+
 void loop() {
 
   // read the state of the switch/button:
@@ -236,8 +272,10 @@ void loop() {
   lastButtonState = reading;
 
   for (int reader = 0; reader < NR_OF_READERS; reader++) {
+
     if(!mfrc522[reader].PICC_IsNewCardPresent()) {
       // If no card is present
+      pollPres(reader);
     } else if (mfrc522[reader].PICC_ReadCardSerial()) {
 
       MFRC522::PICC_Type piccType = mfrc522[reader].PICC_GetType(mfrc522[reader].uid.sak);
