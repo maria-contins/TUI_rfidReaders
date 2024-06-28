@@ -12,7 +12,7 @@
 #define SS_2_PIN        12
 #define SS_3_PIN        13 
 #define BUTTON_PIN      32
-#define NR_OF_READERS   1
+#define NR_OF_READERS   3
 #define MODULE_SIZE     50  // max size for the module char array
 #define ID              0 
 
@@ -41,8 +41,8 @@ struct_message boardsStruct[1] = {board1};
 bool dataReceived = false;
 // -----------------------ESP-NOW---------------------------------------------
 
-//byte ssPins[] = {SS_1_PIN, SS_2_PIN};
-byte ssPins[] = {SS_3_PIN};
+byte ssPins[] = {SS_1_PIN, SS_2_PIN, SS_3_PIN};
+//byte ssPins[] = {SS_3_PIN};
 
 MFRC522 mfrc522[NR_OF_READERS];
 
@@ -159,19 +159,6 @@ void printDec(byte *buffer, byte bufferSize) {
   }
 }
 
-// void copyToGlobal() {
-//     for (uint8_t i = 0; i < NR_OF_READERS; i++) {
-//         globalState[i] = state[i];
-//     }
-
-//     int pos = myData.id * NR_OF_READERS;
-//     int endPos = pos + NR_OF_READERS;
-
-//     for (uint8_t i = pos, j = 0; i < endPos; i++, j++) {
-//         globalState[i] = String(myData.module).substring(j * MODULE_SIZE / NR_OF_READERS, (j + 1) * MODULE_SIZE / NR_OF_READERS);
-//     }
-// }
-
 void serializeStateArray(char *serializedState) {
   String stateString = "";
   stateString += ID;
@@ -257,17 +244,17 @@ void loop() {
       Serial.println();
 
       // Check if the UID is already present in the state array
-      bool uidPresent = false;
-      String currentUID = ""; // Initialize to an empty string
-      for (int i = 0; i < NR_OF_READERS; i++) {
-        if (state[i] == "") continue;
-        currentUID = state[i];
-        if (currentUID == String(mfrc522[reader].uid.uidByte, DEC)) { // Compare with the current UID
-          uidPresent = true;
-          state[i] = "";
-          break;
-        }
-      }
+      // bool uidPresent = false;
+      // String currentUID = ""; // Initialize to an empty string
+      // for (int i = 0; i < NR_OF_READERS; i++) {
+      //   if (state[i] == "") continue;
+      //   currentUID = state[i];
+      //   if (currentUID == String(mfrc522[reader].uid.uidByte, DEC)) { // Compare with the current UID
+      //     uidPresent = true;
+      //     state[i] = "";
+      //     break;
+      //   }
+      // }
       state[reader] = "";
       for (byte i = 0; i < mfrc522[reader].uid.size; i++) {
         state[reader] += String(mfrc522[reader].uid.uidByte[i], DEC);
