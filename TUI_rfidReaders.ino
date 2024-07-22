@@ -6,44 +6,70 @@
 #include <MFRC522.h>
 #include <esp_now.h>
 #include <WiFi.h>
+#include <ArduinoJson.h>
 
-#define RST_PIN         32
-#define SS_1_PIN        26
-#define SS_2_PIN        25
-#define SS_3_PIN        33 
+#define SS_1_PIN        12
+#define SS_2_PIN        13
+#define SS_3_PIN        14 
 #define BUTTON_PIN      32
 #define NR_OF_READERS   3
 #define MODULE_SIZE     50  // Max size for the module char array
-#define ID              0
+#define ID              1
 #define BLE_NAME        "ESP32server" 
+
+enum MessageType {ELECTION, DATA};
+MessageType messageType;
+
+// LEADER ELECTION
+
+// Leader
+bool leader = false;
+bool knowsleader = false;
+int id = 0;
+unsigned long lastMsgTime = 0;
+
+// MAC
+uint8_t broadcastAddress[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+uint8_t leaderAddress[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+
+// Create peer interface
+esp_now_peer_info_t peerInfo;
+
+typedef struct leader_Message {
+  uint8_t msgType;
+  int type;
+  int id;
+} leader_Message;
+
+leader_Message myleader_Message;
+
+// MODULE STATE
 
 int buttonState;            // Current reading from the input pin
 int lastButtonState = LOW;
 unsigned long lastDebounceTime = 0;  // Last time the output pin was toggled
-unsigned long debounceDelay = 50;
+unsigned long debounceDelay = 20;
+bool readCard = false;
 
-// ESP-NOW configurations
 int nr_modules = 3; // TODO: change dynamically
-bool removedCard;
 
 typedef struct struct_message {
+  uint8_t msgType;
   int id;
   int nr_readers;
   char module[MODULE_SIZE];
 } struct_message;
 
 struct_message myData;
-struct_message board1;
-struct_message boardsStruct[1] = {board1};
-
-bool dataReceived = false;
 
 byte ssPins[] = {SS_1_PIN, SS_2_PIN, SS_3_PIN};
 MFRC522 mfrc522[NR_OF_READERS];
 
 String state[NR_OF_READERS];
-String *globalState;
+String globalState[NR_OF_READERS * 3];  // Assuming 3 modules for now
 String lastState[NR_OF_READERS];
+
+// BLE CONFIG
 
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define STATE_CHAR_UUID "b481757e-6e97-4ea4-862b-5a651dc7db82"
@@ -82,6 +108,16 @@ void printMAC(const uint8_t *mac_addr) {
 }
 
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
+  uint8_t type = incomingData[0];
+  switch (type) {
+  case DATA :
+    readData(mac_addr, incomingData, len);
+  case ELECTION :
+    checkLeader(mac_addr, incomingData, len);
+  }
+}
+
+void readData(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
   
   printMAC(mac_addr);
   memcpy(&myData, incomingData, sizeof(myData));
@@ -93,6 +129,55 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
   stateCharacteristic.setValue(serializedState);
 }
 
+void checkLeader(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
+  leader_Message incomingMsg;
+  memcpy(&incomingMsg, incomingData, sizeof(incomingMsg));
+
+  Serial.print("Received message of type: ");
+  Serial.println(incomingMsg.type);
+
+  if (incomingMsg.type == 3) { // there is a leader
+    memcpy(leaderAddress, mac_addr, 6);
+    char macStr[18];
+    Serial.print("Packet received from: ");
+    snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
+             mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+    Serial.println(macStr);
+    // Register peer
+    memcpy(peerInfo.peer_addr, leaderAddress, 6);
+    peerInfo.channel = 1;  
+    peerInfo.encrypt = false;
+    // Add peer        
+    if (esp_now_add_peer(&peerInfo) != ESP_OK){
+      Serial.println("Failed to add peer");
+      return;
+    }
+    Serial.print("Leader elected with ID: ");
+    Serial.println(incomingMsg.id);
+    leader = false; // If we receive an elected message, we are not the leader
+    knowsleader = true;
+  }
+  else if (incomingMsg.type == 2) { // checking
+    if (leader) {
+      Serial.println("Received check_leader message, sending elected message.");
+      leader_Message electedMsg;
+      electedMsg.msgType = ELECTION;
+      electedMsg.type = 3;
+      electedMsg.id = id;
+      esp_now_send(broadcastAddress, (uint8_t *) &electedMsg, sizeof(electedMsg));
+    }
+  }
+  else if (incomingMsg.type == 1 && leader) {
+    Serial.print("Received data message from ID: ");
+    Serial.println(incomingMsg.id);
+  }  
+}
+
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("\r\nLast Packet Send Status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+}
+
 void espNowInit() {
   WiFi.mode(WIFI_STA);
   WiFi.channel(1);
@@ -100,8 +185,53 @@ void espNowInit() {
     Serial.println("Error initializing ESP-NOW");
     return;
   }
+  Serial.println("ESP-NOW initialized.");
   esp_now_register_recv_cb(OnDataRecv);
-  globalState = new String[NR_OF_READERS * nr_modules];
+  esp_now_register_send_cb(OnDataSent);
+
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.channel = 1;  
+  peerInfo.encrypt = false;
+  // Add peer        
+  if (esp_now_add_peer(&peerInfo) != ESP_OK){
+    Serial.println("Failed to add peer");
+    return;
+  }
+
+  leaderElection();
+
+  delay(500);
+}
+
+void leaderElection() {
+  Serial.println("Starting leader election.");
+  leader_Message checkLeaderMsg;
+  checkLeaderMsg.msgType = ELECTION;
+  checkLeaderMsg.type = 2;
+  esp_now_send(broadcastAddress, (uint8_t *) &checkLeaderMsg, sizeof(checkLeaderMsg));
+
+  unsigned long startTime = millis();
+  while (millis() - startTime < 5000) {
+    // Waiting for elected message
+    delay(100);
+  }
+
+  if (!knowsleader) {
+    Serial.println("No leader found, assuming leadership.");
+    leader = true;
+    leader_Message electedMsg;
+    electedMsg.msgType = ELECTION;
+    electedMsg.type = 3;
+    electedMsg.id = id;
+    esp_now_send(broadcastAddress, (uint8_t *) &electedMsg, sizeof(electedMsg));
+    knowsleader = true;
+  } else {
+    Serial.println("Leader found.");
+  }
+
+  if(!leader) {
+    esp_now_unregister_recv_cb();
+  }
 }
 
 void bleInit() {
@@ -141,7 +271,9 @@ void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   espNowInit();
   SPI.begin();
-  bleInit();
+  if (leader) {
+    bleInit();
+  }  
 }
 
 void serializeStateArray(char *serializedState) {
@@ -164,17 +296,6 @@ void serializeMessage(char *serializedState, const struct_message& myData) {
   stateString += ",";
   stateString += myData.module;
   stateString.toCharArray(serializedState, MODULE_SIZE);
-}
-
-void serializeGlobalStateArray(char *serializedGlobalState) {
-  String globalStateString = "";
-  for (int i = 0; i < NR_OF_READERS * nr_modules; i++) {
-    globalStateString += globalState[i];
-    if (i < (NR_OF_READERS * nr_modules) - 1) {
-      globalStateString += ",";
-    }
-  }
-  globalStateString.toCharArray(serializedGlobalState, MODULE_SIZE);
 }
 
 void printStateArray() {
@@ -211,6 +332,30 @@ void pollPres(int reader) {
   mfrc522[reader].PICC_HaltA();
 }
 
+void sendData() {        
+  char serializedState[MODULE_SIZE];
+  serializeStateArray(serializedState);
+        
+  if (leader) {
+    stateCharacteristic.setValue(serializedState);
+  } else {       
+    myData.msgType = DATA;   
+    myData.id = ID;
+    myData.nr_readers = NR_OF_READERS;
+
+    strncpy(myData.module, serializedState, MODULE_SIZE);
+    Serial.println(serializedState);
+    // Send message via ESP-NOW
+    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
+        
+    if (result == ESP_OK) {
+      Serial.println("Sent with success");
+    } else {
+      Serial.println("Error sending the data");
+    }
+  }
+}
+
 void loop() {
   int reading = digitalRead(BUTTON_PIN);
 
@@ -222,12 +367,8 @@ void loop() {
     if (reading != buttonState) {
       buttonState = reading;
       if (buttonState == HIGH) {
-        
         Serial.println("submit!");
-        char serializedState[MODULE_SIZE];
-        serializeStateArray(serializedState);
-
-        stateCharacteristic.setValue(serializedState);
+        sendData();
       }
     }
   }
@@ -245,12 +386,9 @@ void loop() {
           state[reader] += " ";
         }
       }
-
-      char serializedState[MODULE_SIZE];
-      serializeStateArray(serializedState);
-
-      stateCharacteristic.setValue(serializedState);
-
+  
+      sendData();
+      
       mfrc522[reader].PICC_HaltA();
       mfrc522[reader].PCD_StopCrypto1();
 
@@ -258,4 +396,3 @@ void loop() {
     }
   }
 }
-
