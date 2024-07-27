@@ -11,6 +11,7 @@
 #define SS_1_PIN        12
 #define SS_2_PIN        13
 #define SS_3_PIN        14 
+#define RST_PIN         22         // Configurable, see typical pin layout above
 #define BUTTON_PIN      32
 #define NR_OF_READERS   3
 #define MODULE_SIZE     50  // Max size for the module char array
@@ -87,6 +88,7 @@ class MyServerCallbacks: public BLEServerCallbacks {
     deviceConnected = false;
   }
 };
+
 
 void printStructMessage(const struct_message& msg) {
   Serial.print("ID: ");
@@ -238,7 +240,7 @@ void bleInit() {
   Serial.println("Starting BLE");
 
   for (uint8_t reader = 0; reader < NR_OF_READERS; reader++) {
-    mfrc522[reader].PCD_Init(ssPins[reader], MFRC522::UNUSED_PIN);
+    mfrc522[reader].PCD_Init(ssPins[reader], RST_PIN);
     delay(30);
     Serial.print(F("Reader "));
     Serial.print(reader);
@@ -334,9 +336,10 @@ void pollPres(int reader) {
 
 void sendData() {        
   char serializedState[MODULE_SIZE];
-  serializeStateArray(serializedState);
+  
         
   if (leader) {
+    serializeStateArray(serializedState);
     stateCharacteristic.setValue(serializedState);
   } else {       
     myData.msgType = DATA;   
