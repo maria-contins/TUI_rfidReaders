@@ -110,12 +110,17 @@ void printMAC(const uint8_t *mac_addr) {
 }
 
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
+  Serial.print("RECEIVED MESSAGE: ");
   uint8_t type = incomingData[0];
   switch (type) {
   case DATA :
+    Serial.println("DATA");    
     readData(mac_addr, incomingData, len);
+    break;
   case ELECTION :
+    Serial.println("LEADER ELECTION"); 
     checkLeader(mac_addr, incomingData, len);
+    break;
   }
 }
 
@@ -127,7 +132,7 @@ void readData(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
   printStructMessage(myData);
 
   char serializedState[MODULE_SIZE];
-  serializeMessage(serializedState, myData);
+  serializeMessage(serializedState, myData); // may be wrong
   stateCharacteristic.setValue(serializedState);
 }
 
@@ -336,18 +341,15 @@ void pollPres(int reader) {
 
 void sendData() {        
   char serializedState[MODULE_SIZE];
-  
+  serializeStateArray(serializedState);
         
   if (leader) {
-    serializeStateArray(serializedState);
     stateCharacteristic.setValue(serializedState);
   } else {       
     myData.msgType = DATA;   
     myData.id = ID;
     myData.nr_readers = NR_OF_READERS;
-
     strncpy(myData.module, serializedState, MODULE_SIZE);
-    Serial.println(serializedState);
     // Send message via ESP-NOW
     esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
         
@@ -389,13 +391,13 @@ void loop() {
           state[reader] += " ";
         }
       }
-  
+      printStateArray();
       sendData();
       
       mfrc522[reader].PICC_HaltA();
       mfrc522[reader].PCD_StopCrypto1();
 
-      printStateArray();
+      
     }
   }
 }
