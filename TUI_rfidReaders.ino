@@ -113,12 +113,10 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
   Serial.print("RECEIVED MESSAGE: ");
   uint8_t type = incomingData[0];
   switch (type) {
-  case DATA :
-    Serial.println("DATA");    
+  case DATA :  
     readData(mac_addr, incomingData, len);
     break;
   case ELECTION :
-    Serial.println("LEADER ELECTION"); 
     checkLeader(mac_addr, incomingData, len);
     break;
   }
@@ -242,46 +240,54 @@ void leaderElection() {
 }
 
 void bleInit() {
-  Serial.println("Starting BLE");
+    Serial.println("Starting BLE");
 
-  for (uint8_t reader = 0; reader < NR_OF_READERS; reader++) {
-    mfrc522[reader].PCD_Init(ssPins[reader], RST_PIN);
-    delay(30);
-    Serial.print(F("Reader "));
-    Serial.print(reader);
-    Serial.print(F(": "));
-    mfrc522[reader].PCD_DumpVersionToSerial();
-  }
+    BLEDevice::init(BLE_NAME);
+    BLEServer *pServer = BLEDevice::createServer();
+    BLEService *pService = pServer->createService(SERVICE_UUID);
 
-  BLEDevice::init(BLE_NAME);
-  BLEServer *pServer = BLEDevice::createServer();
-  BLEService *pService = pServer->createService(SERVICE_UUID);
+    pService->addCharacteristic(&stateCharacteristic);
+    stateDescriptor.setValue("State Array");
+    stateCharacteristic.addDescriptor(new BLE2902());
 
-  pService->addCharacteristic(&stateCharacteristic);
-  stateDescriptor.setValue("State Array");
-  stateCharacteristic.addDescriptor(new BLE2902());
+    pServer->setCallbacks(new MyServerCallbacks());
+    pService->start();
 
-  pServer->setCallbacks(new MyServerCallbacks());
-  pService->start();
-
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06);
-  pAdvertising->setMinPreferred(0x12);
-  BLEDevice::startAdvertising();
-  Serial.println("Characteristic defined");
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->setScanResponse(true);
+    pAdvertising->setMinPreferred(0x06);
+    pAdvertising->setMinPreferred(0x12);
+    BLEDevice::startAdvertising();
+    Serial.println("Characteristic defined");
 }
 
 void setup() {
-  Serial.begin(115200);
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
-  espNowInit();
-  SPI.begin();
-  if (leader) {
-    bleInit();
-  }  
+    Serial.begin(115200);
+    pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+    // Initialize SPI
+    SPI.begin();
+
+    // Initialize RFID readers
+    for (uint8_t reader = 0; reader < NR_OF_READERS; reader++) {
+        mfrc522[reader].PCD_Init(ssPins[reader], RST_PIN);
+        delay(30);
+        Serial.print(F("Reader "));
+        Serial.print(reader);
+        Serial.print(F(": "));
+        mfrc522[reader].PCD_DumpVersionToSerial();
+    }
+
+    // Initialize ESP-NOW
+    espNowInit();
+
+    // Initialize BLE if this ESP32 is the leader
+    if (leader) {
+        bleInit();
+    }  
 }
+
 
 void serializeStateArray(char *serializedState) {
   String stateString = "";
@@ -330,9 +336,10 @@ void pollPres(int reader) {
 
         char serializedState[MODULE_SIZE];
         serializeStateArray(serializedState);
-        stateCharacteristic.setValue(serializedState);
-
         printStateArray();
+        sendData();
+
+        
       }
     }
   }
@@ -350,7 +357,6 @@ void sendData() {
     myData.id = ID;
     myData.nr_readers = NR_OF_READERS;
     strncpy(myData.module, serializedState, MODULE_SIZE);
-    // Send message via ESP-NOW
     esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
         
     if (result == ESP_OK) {
@@ -372,7 +378,7 @@ void loop() {
     if (reading != buttonState) {
       buttonState = reading;
       if (buttonState == HIGH) {
-        Serial.println("submit!");
+        Serial.println("Button press.");
         sendData();
       }
     }
@@ -391,7 +397,8 @@ void loop() {
           state[reader] += " ";
         }
       }
-      printStateArray();
+      
+      printStateArray();      
       sendData();
       
       mfrc522[reader].PICC_HaltA();
