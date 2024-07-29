@@ -123,15 +123,12 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
 }
 
 void readData(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
-  
-  printMAC(mac_addr);
-  memcpy(&myData, incomingData, sizeof(myData));
-  
-  printStructMessage(myData);
+    printMAC(mac_addr);
+    memcpy(&myData, incomingData, sizeof(myData));
+    printStructMessage(myData);
 
-  char serializedState[MODULE_SIZE];
-  serializeMessage(serializedState, myData); // may be wrong
-  stateCharacteristic.setValue(serializedState);
+    // Directly use myData.module without re-serializing the ID
+    stateCharacteristic.setValue(myData.module);
 }
 
 void checkLeader(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
@@ -290,25 +287,24 @@ void setup() {
 
 
 void serializeStateArray(char *serializedState) {
-  String stateString = "";
-  stateString += ID;
-  stateString += ",";
-  for (int i = 0; i < NR_OF_READERS; i++) {
-    stateString += state[i];
-    if (i < NR_OF_READERS - 1) {
-      stateString += ",";
+    String stateString = "";
+    stateString += ID;
+    stateString += ",";
+    for (int i = 0; i < NR_OF_READERS; i++) {
+        stateString += state[i];
+        if (i < NR_OF_READERS - 1) {
+            stateString += ",";
+        }
     }
-  }
-  stateString += (buttonState == HIGH) ? ",1" : ",0";
-  stateString.toCharArray(serializedState, MODULE_SIZE);
+    stateString += (buttonState == HIGH) ? ",1" : ",0";
+    stateString.toCharArray(serializedState, MODULE_SIZE);
 }
 
 void serializeMessage(char *serializedState, const struct_message& myData) {
-  String stateString = "";
-  stateString += myData.id;
-  stateString += ",";
-  stateString += myData.module;
-  stateString.toCharArray(serializedState, MODULE_SIZE);
+    String stateString = "";
+    // Only serialize module, since module already includes the necessary information.
+    stateString += myData.module;
+    stateString.toCharArray(serializedState, MODULE_SIZE);
 }
 
 void printStateArray() {
