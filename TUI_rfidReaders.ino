@@ -15,7 +15,7 @@
 #define BUTTON_PIN      32
 #define NR_OF_READERS   3
 #define MODULE_SIZE     50  // Max size for the module char array
-#define ID              1
+#define ID              0
 #define BLE_NAME        "ESP32server" 
 
 enum MessageType {ELECTION, DATA};
