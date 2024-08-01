@@ -292,7 +292,7 @@ void bleInit() {
 }
 
 void setupLCDs() {
-   if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+   if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println(F("SSD1306 allocation failed"));
   }
   display.clearDisplay();
@@ -304,8 +304,7 @@ void setupLCDs() {
 
   delay(2000);
   display.clearDisplay();
-
-  testanimate(logo_bmp, LOGO_WIDTH, LOGO_HEIGHT);
+  display.display();
 }
 
 void testanimate(const uint8_t *bitmap, uint8_t w, uint8_t h) {
@@ -316,12 +315,12 @@ void testanimate(const uint8_t *bitmap, uint8_t w, uint8_t h) {
     icons[f][XPOS]   = random(1 - LOGO_WIDTH, display.width());
     icons[f][YPOS]   = -LOGO_HEIGHT;
     icons[f][DELTAY] = random(1, 6);
-    Serial.print(F("x: "));
-    Serial.print(icons[f][XPOS], DEC);
-    Serial.print(F(" y: "));
-    Serial.print(icons[f][YPOS], DEC);
-    Serial.print(F(" dy: "));
-    Serial.println(icons[f][DELTAY], DEC);
+    // Serial.print(F("x: "));
+    // Serial.print(icons[f][XPOS], DEC);
+    // Serial.print(F(" y: "));
+    // Serial.print(icons[f][YPOS], DEC);
+    // Serial.print(F(" dy: "));
+    // Serial.println(icons[f][DELTAY], DEC);
   }
 
   for(;;) { // Loop forever...
@@ -358,7 +357,7 @@ void setup() {
 
     // Initialize RFID readers
     for (uint8_t reader = 0; reader < NR_OF_READERS; reader++) {
-        mfrc522[reader].PCD_Init(ssPins[reader], RST_PIN);
+        mfrc522[reader].PCD_Init(ssPins[reader], MFRC522::UNUSED_PIN);
         delay(30);
         Serial.print(F("Reader "));
         Serial.print(reader);
