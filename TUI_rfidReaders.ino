@@ -40,8 +40,8 @@ static const unsigned char PROGMEM logo_bmp[] =
   0b01110000, 0b01110000,
   0b00000000, 0b00110000 };
   
-#define SS_1_PIN        12
-#define SS_2_PIN        13
+#define SS_1_PIN        13
+#define SS_2_PIN        12
 #define SS_3_PIN        14 
 #define RST_PIN         22         // Configurable, see typical pin layout above
 #define BUTTON_PIN      32
@@ -95,7 +95,7 @@ typedef struct struct_message {
 
 struct_message myData;
 
-byte ssPins[] = {SS_1_PIN, SS_3_PIN, SS_2_PIN};
+byte ssPins[] = {SS_1_PIN, SS_2_PIN, SS_3_PIN};
 MFRC522 mfrc522[NR_OF_READERS];
 
 char state[NR_OF_READERS][BUFFER_SIZE];
@@ -377,29 +377,41 @@ void printStateArray() {
 void pollPres(int reader) {
     byte bufferATQA[2];
     byte bufferSize = sizeof(bufferATQA);
+    int detections = 0;
+    const int pollInterval = 20;
+    const int maxPolls = 25;
+    const int detectionsNeeded = 25;
 
     // Set reader modes
     mfrc522[reader].PCD_WriteRegister(mfrc522[reader].TxModeReg, 0x00);
     mfrc522[reader].PCD_WriteRegister(mfrc522[reader].RxModeReg, 0x00);
     mfrc522[reader].PCD_WriteRegister(mfrc522[reader].ModWidthReg, 0x26);
 
-    // Check for card presence
-    if (mfrc522[reader].PICC_WakeupA(bufferATQA, &bufferSize)) {
+    for(int i = 0; i < maxPolls; i++) {
+      // Check for card presence
+      if (mfrc522[reader].PICC_WakeupA(bufferATQA, &bufferSize)) {
         if (mfrc522[reader].uid.size != 0) {
-            // Clear the state if a card is detected
-            if (strlen(state[reader]) > 0) {
-                state[reader][0] = '\0';
+          detections++;
+        } else { return; }
 
-                char serializedState[BUFFER_SIZE];
-                serializeStateArray(serializedState);  // Serialize the current state
-                printStateArray();
-                sendData();  // Send the serialized state
-            }
+        if (detections >= detectionsNeeded) {
+            if (strlen(state[reader]) > 0) {
+            state[reader][0] = '\0';
+
+            char serializedState[BUFFER_SIZE];
+            serializeStateArray(serializedState);  // Serialize the current state
+            printStateArray();
+            sendData();  // Send the serialized state
+
+            mfrc522[reader].PICC_HaltA();
+            return;
+          }
         }
+      }
     }
+
     mfrc522[reader].PICC_HaltA();  // Halt the card
 }
-
 
 
 void sendData() {
