@@ -46,7 +46,7 @@ static const unsigned char PROGMEM logo_bmp[] =
 #define RST_PIN         22         // Configurable, see typical pin layout above
 #define BUTTON_PIN      32
 #define NR_OF_READERS   3
-#define MODULE_SIZE     50  // Max size for the module char array
+#define BUFFER_SIZE     50  // Max size for the module char array
 #define ID              0
 #define BLE_NAME        "ESP32server" 
 
@@ -90,7 +90,7 @@ typedef struct struct_message {
   uint8_t msgType;
   int id;
   int nr_readers;
-  char module[MODULE_SIZE];
+  char module[BUFFER_SIZE];
 } struct_message;
 
 struct_message myData;
@@ -98,9 +98,9 @@ struct_message myData;
 byte ssPins[] = {SS_1_PIN, SS_3_PIN, SS_2_PIN};
 MFRC522 mfrc522[NR_OF_READERS];
 
-String state[NR_OF_READERS];
-String globalState[NR_OF_READERS * 3];  // Assuming 3 modules for now
-String lastState[NR_OF_READERS];
+char state[NR_OF_READERS][BUFFER_SIZE];
+char globalState[NR_OF_READERS * 3][BUFFER_SIZE];  // Assuming 3 modules for now
+char lastState[NR_OF_READERS][BUFFER_SIZE];
 
 unsigned long lastPollTime[NR_OF_READERS] = {0};  // Stores the last time each reader was polled
 const unsigned long pollInterval = 1000;  // Debounce interval in milliseconds
@@ -341,125 +341,146 @@ void setup() {
 
 
 void serializeStateArray(char *serializedState) {
-    String stateString = "";
-    stateString += ID;
-    stateString += ",";
+    // Start with the ID
+    int index = 0;
+    index += snprintf(serializedState + index, BUFFER_SIZE - index, "%d,", ID);
+
+    // Append each reader's state to the serialized state
     for (int i = 0; i < NR_OF_READERS; i++) {
-        stateString += state[i];
+        strncat(serializedState, state[i], BUFFER_SIZE - strlen(serializedState) - 1);
         if (i < NR_OF_READERS - 1) {
-            stateString += ",";
+            strncat(serializedState, ",", BUFFER_SIZE - strlen(serializedState) - 1);
         }
     }
-    stateString += (buttonState == HIGH) ? ",1" : ",0";
-    stateString.toCharArray(serializedState, MODULE_SIZE);
+
+    // Append the button state
+    strncat(serializedState, (buttonState == HIGH) ? ",1" : ",0", BUFFER_SIZE - strlen(serializedState) - 1);
 }
 
+
 void serializeMessage(char *serializedState, const struct_message& myData) {
-    String stateString = "";
-    // Only serialize module, since module already includes the necessary information.
-    stateString += myData.module;
-    stateString.toCharArray(serializedState, MODULE_SIZE);
+    // Serialize the module (the module already contains necessary information)
+    strncpy(serializedState, myData.module, BUFFER_SIZE - 1);
+    serializedState[BUFFER_SIZE - 1] = '\0';  // Ensure null-termination
 }
 
 void printStateArray() {
-  Serial.println("State array:");
-  for (int reader = 0; reader < NR_OF_READERS; reader++) {
-    Serial.print("Reader ");
-    Serial.print(reader);
-    Serial.print(": ");
-    Serial.println(state[reader]);
-  }
+    Serial.println("State array:");
+    for (int reader = 0; reader < NR_OF_READERS; reader++) {
+        Serial.print("Reader ");
+        Serial.print(reader);
+        Serial.print(": ");
+        Serial.println(state[reader]);
+    }
 }
 
 void pollPres(int reader) {
-  byte bufferATQA[2];
-  byte bufferSize = sizeof(bufferATQA);
+    byte bufferATQA[2];
+    byte bufferSize = sizeof(bufferATQA);
 
-  mfrc522[reader].PCD_WriteRegister(mfrc522[reader].TxModeReg, 0x00);
-  mfrc522[reader].PCD_WriteRegister(mfrc522[reader].RxModeReg, 0x00);
-  mfrc522[reader].PCD_WriteRegister(mfrc522[reader].ModWidthReg, 0x26);
+    // Set reader modes
+    mfrc522[reader].PCD_WriteRegister(mfrc522[reader].TxModeReg, 0x00);
+    mfrc522[reader].PCD_WriteRegister(mfrc522[reader].RxModeReg, 0x00);
+    mfrc522[reader].PCD_WriteRegister(mfrc522[reader].ModWidthReg, 0x26);
 
-  if (mfrc522[reader].PICC_WakeupA(bufferATQA, &bufferSize)) {
-    if (mfrc522[reader].uid.size != 0) {
-      if (state[reader] != "") {
-        state[reader] = "";
+    // Check for card presence
+    if (mfrc522[reader].PICC_WakeupA(bufferATQA, &bufferSize)) {
+        if (mfrc522[reader].uid.size != 0) {
+            // Clear the state if a card is detected
+            if (strlen(state[reader]) > 0) {
+                state[reader][0] = '\0';
 
-        char serializedState[MODULE_SIZE];
-        serializeStateArray(serializedState);
-        printStateArray();
-        sendData();
-
-        
-      }
+                char serializedState[BUFFER_SIZE];
+                serializeStateArray(serializedState);  // Serialize the current state
+                printStateArray();
+                sendData();  // Send the serialized state
+            }
+        }
     }
-  }
-  mfrc522[reader].PICC_HaltA();
+    mfrc522[reader].PICC_HaltA();  // Halt the card
 }
 
-void sendData() {        
-  char serializedState[MODULE_SIZE];
-  serializeStateArray(serializedState);
-        
-  if (leader) {
-    stateCharacteristic.setValue(serializedState);
-  } else {       
-    myData.msgType = DATA;   
-    myData.id = ID;
-    myData.nr_readers = NR_OF_READERS;
-    strncpy(myData.module, serializedState, MODULE_SIZE);
-    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
-        
-    if (result == ESP_OK) {
-      Serial.println("Sent with success");
+
+
+void sendData() {
+    char serializedState[BUFFER_SIZE];
+    serializeStateArray(serializedState);  // Serialize the current state
+
+    if (leader) {
+        stateCharacteristic.setValue(serializedState);  // Set the BLE characteristic value if leader
     } else {
-      Serial.println("Error sending the data");
+        myData.msgType = DATA;
+        myData.id = ID;
+        myData.nr_readers = NR_OF_READERS;
+        strncpy(myData.module, serializedState, BUFFER_SIZE - 1);  // Copy the serialized state to myData.module
+        myData.module[BUFFER_SIZE - 1] = '\0';  // Ensure null-termination
+
+        // Send the data using ESP-NOW
+        esp_err_t result = esp_now_send(broadcastAddress, (uint8_t*)&myData, sizeof(myData));
+
+        if (result == ESP_OK) {
+            Serial.println("Sent with success");
+        } else {
+            Serial.println("Error sending the data");
+        }
     }
-  }
 }
+
 
 void loop() {
   int reading = digitalRead(BUTTON_PIN);
 
+  // Check if the button state has changed (debouncing)
   if (reading != lastButtonState) {
-    lastDebounceTime = millis();
+    lastDebounceTime = millis();  // Reset the debounce timer
   }
 
+  // Debounce check
   if ((millis() - lastDebounceTime) > debounceDelay) {
     if (reading != buttonState) {
       buttonState = reading;
       if (buttonState == HIGH) {
         Serial.println("Button press.");
-        sendData();
+        sendData();  // Send data when button is pressed
       }
     }
   }
 
-  lastButtonState = reading;
+  lastButtonState = reading;  // Update the last button state
 
   unsigned long currentTime = millis();
 
   for (int reader = 0; reader < NR_OF_READERS; reader++) {
+    // Check if a new card is present
     if (!mfrc522[reader].PICC_IsNewCardPresent()) {
       if (currentTime - lastPollTime[reader] >= pollInterval) {
-        pollPres(reader);
+        pollPres(reader);  // Poll for presence
         lastPollTime[reader] = currentTime;
       }
-    } else if (mfrc522[reader].PICC_ReadCardSerial()) {
-      state[reader] = "";
+    } else if (mfrc522[reader].PICC_ReadCardSerial()) {  // Read the card's UID
+      char uidBuffer[BUFFER_SIZE] = "";  // Buffer for UID
       for (byte i = 0; i < mfrc522[reader].uid.size; i++) {
-        state[reader] += String(mfrc522[reader].uid.uidByte[i], DEC);
+        char uidPart[5];  // Buffer for a part of the UID
+        snprintf(uidPart, sizeof(uidPart), "%d", mfrc522[reader].uid.uidByte[i]);
+        strcat(uidBuffer, uidPart);
         if (i < mfrc522[reader].uid.size - 1) {
-          state[reader] += " ";
+          strcat(uidBuffer, " ");  // Add space between UID parts
         }
       }
+
+      // Update the reader state
+      strcpy(state[reader], uidBuffer);
       
-      printStateArray();      
+      // Print state array
+      printStateArray();
+
+      // Send data
       sendData();
-      
+
+      // Halt and stop encryption
       mfrc522[reader].PICC_HaltA();
       mfrc522[reader].PCD_StopCrypto1();
-
-      
     }
   }
 }
+
