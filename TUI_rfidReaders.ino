@@ -81,7 +81,7 @@ leader_Message myleader_Message;
 int buttonState;            // Current reading from the input pin
 int lastButtonState = LOW;
 unsigned long lastDebounceTime = 0;  // Last time the output pin was toggled
-unsigned long debounceDelay = 20;
+unsigned long debounceDelay = 80;
 bool readCard = false;
 
 int nr_modules = 3; // TODO: change dynamically
@@ -95,12 +95,15 @@ typedef struct struct_message {
 
 struct_message myData;
 
-byte ssPins[] = {SS_1_PIN, SS_2_PIN, SS_3_PIN};
+byte ssPins[] = {SS_1_PIN, SS_3_PIN, SS_2_PIN};
 MFRC522 mfrc522[NR_OF_READERS];
 
 String state[NR_OF_READERS];
 String globalState[NR_OF_READERS * 3];  // Assuming 3 modules for now
 String lastState[NR_OF_READERS];
+
+unsigned long lastPollTime[NR_OF_READERS] = {0};  // Stores the last time each reader was polled
+const unsigned long pollInterval = 1000;  // Debounce interval in milliseconds
 
 // BLE CONFIG
 
@@ -212,7 +215,7 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
 
-void espNowInit() {
+void  espNowInit() {
   WiFi.mode(WIFI_STA);
   WiFi.channel(1);
   if (esp_now_init() != ESP_OK) {
@@ -304,48 +307,8 @@ void setupLCDs() {
 
   delay(2000);
   display.clearDisplay();
+  display.println(ID);
   display.display();
-}
-
-void testanimate(const uint8_t *bitmap, uint8_t w, uint8_t h) {
-  int8_t f, icons[NUMFLAKES][3];
-
-  // Initialize 'snowflake' positions
-  for(f=0; f< NUMFLAKES; f++) {
-    icons[f][XPOS]   = random(1 - LOGO_WIDTH, display.width());
-    icons[f][YPOS]   = -LOGO_HEIGHT;
-    icons[f][DELTAY] = random(1, 6);
-    // Serial.print(F("x: "));
-    // Serial.print(icons[f][XPOS], DEC);
-    // Serial.print(F(" y: "));
-    // Serial.print(icons[f][YPOS], DEC);
-    // Serial.print(F(" dy: "));
-    // Serial.println(icons[f][DELTAY], DEC);
-  }
-
-  for(;;) { // Loop forever...
-    display.clearDisplay(); // Clear the display buffer
-
-    // Draw each snowflake:
-    for(f=0; f< NUMFLAKES; f++) {
-      display.drawBitmap(icons[f][XPOS], icons[f][YPOS], bitmap, w, h, SSD1306_WHITE);
-    }
-
-    display.display(); // Show the display buffer on the screen
-    delay(200);        // Pause for 1/10 second
-
-    // Then update coordinates of each flake...
-    for(f=0; f< NUMFLAKES; f++) {
-      icons[f][YPOS] += icons[f][DELTAY];
-      // If snowflake is off the bottom of the screen...
-      if (icons[f][YPOS] >= display.height()) {
-        // Reinitialize to a random position, just off the top
-        icons[f][XPOS]   = random(1 - LOGO_WIDTH, display.width());
-        icons[f][YPOS]   = -LOGO_HEIGHT;
-        icons[f][DELTAY] = random(1, 6);
-      }
-    }
-  }
 }
 
 void setup() {
@@ -473,9 +436,14 @@ void loop() {
 
   lastButtonState = reading;
 
+  unsigned long currentTime = millis();
+
   for (int reader = 0; reader < NR_OF_READERS; reader++) {
     if (!mfrc522[reader].PICC_IsNewCardPresent()) {
-      pollPres(reader);
+      if (currentTime - lastPollTime[reader] >= pollInterval) {
+        pollPres(reader);
+        lastPollTime[reader] = currentTime;
+      }
     } else if (mfrc522[reader].PICC_ReadCardSerial()) {
       state[reader] = "";
       for (byte i = 0; i < mfrc522[reader].uid.size; i++) {
