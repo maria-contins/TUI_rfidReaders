@@ -3,6 +3,8 @@
 ## Overview
 This project involves multiple ESP32 devices that dynamically elect a leader to establish and maintain a connection with a middleware application. The system uses Bluetooth Low Energy (BLE) for external communication and ESP-NOW for message passing between devices.
 
+This is used to create a tangible user interface (TUI).
+
 ## Features
 - **Dynamic Leader Election**: ESP32 devices vote to elect a leader responsible for BLE communication with the middleware.
 - **BLE Communication**: Only the leader uses BLE to connect with the external middleware application.
