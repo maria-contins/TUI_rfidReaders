@@ -20,14 +20,14 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #define LOGO_HEIGHT   16
 #define LOGO_WIDTH    16
   
-#define SS_1_PIN        13
-#define SS_2_PIN        12
-#define SS_3_PIN        14 
+#define SS_1_PIN        12
+#define SS_2_PIN        14
+#define SS_3_PIN        13 
 #define RST_PIN         22         // Configurable, see typical pin layout above
 #define BUTTON_PIN      32
 #define NR_OF_READERS   3
 #define BUFFER_SIZE     50  // Max size for the module char array
-#define ID              0
+#define ID              1
 #define BLE_NAME        "ESP32server" 
 
 enum MessageType {ELECTION, DATA};
@@ -75,12 +75,10 @@ typedef struct struct_message {
 
 struct_message myData;
 
-byte ssPins[] = {SS_1_PIN, SS_2_PIN, SS_3_PIN};
+byte ssPins[] = {SS_3_PIN, SS_2_PIN, SS_1_PIN};
 MFRC522 mfrc522[NR_OF_READERS];
 
 char state[NR_OF_READERS][BUFFER_SIZE];
-char globalState[NR_OF_READERS * 3][BUFFER_SIZE];  // Assuming 3 modules for now
-char lastState[NR_OF_READERS][BUFFER_SIZE];
 
 unsigned long lastPollTime[NR_OF_READERS] = {0};  // Stores the last time each reader was polled
 const unsigned long pollInterval = 1000;  // Debounce interval in milliseconds
@@ -104,6 +102,7 @@ class MyServerCallbacks: public BLEServerCallbacks {
   }
 };
 
+bool lastChangeWasRemoval[NR_OF_READERS] = {false};  // Track if the last change was a removal
 
 void printStructMessage(const struct_message& msg) {
   Serial.print("ID: ");
@@ -359,39 +358,45 @@ void pollPres(int reader) {
     byte bufferSize = sizeof(bufferATQA);
     int detections = 0;
     const int pollInterval = 20;
-    const int maxPolls = 25;
-    const int detectionsNeeded = 25;
+    const int maxPolls = 15;
+    const int detectionsNeeded = 15;
 
     // Set reader modes
     mfrc522[reader].PCD_WriteRegister(mfrc522[reader].TxModeReg, 0x00);
     mfrc522[reader].PCD_WriteRegister(mfrc522[reader].RxModeReg, 0x00);
     mfrc522[reader].PCD_WriteRegister(mfrc522[reader].ModWidthReg, 0x26);
 
-    for(int i = 0; i < maxPolls; i++) {
-      // Check for card presence
-      if (mfrc522[reader].PICC_WakeupA(bufferATQA, &bufferSize)) {
-        if (mfrc522[reader].uid.size != 0) {
-          detections++;
-        } else { return; }
+    for (int i = 0; i < maxPolls; i++) {
+        // Check for card presence
+        if (mfrc522[reader].PICC_WakeupA(bufferATQA, &bufferSize)) {
+            if (mfrc522[reader].uid.size != 0) {
+                detections++;
+            } else {
+                return;
+            }
 
-        if (detections >= detectionsNeeded) {
-            if (strlen(state[reader]) > 0) {
-            state[reader][0] = '\0';
+            if (detections >= detectionsNeeded) {
+                if (strlen(state[reader]) > 0) {
+                    state[reader][0] = '\0';  // Clear state to mark removal
 
-            char serializedState[BUFFER_SIZE];
-            serializeStateArray(serializedState);  // Serialize the current state
-            printStateArray();
-            sendData();  // Send the serialized state
+                    char serializedState[BUFFER_SIZE];
+                    serializeStateArray(serializedState);  // Serialize the current state
+                    printStateArray();
+                    sendData();  // Send the serialized state
 
-            mfrc522[reader].PICC_HaltA();
-            return;
-          }
+                    // Mark the last change as a removal
+                    lastChangeWasRemoval[reader] = true;
+
+                    mfrc522[reader].PICC_HaltA();
+                    return;
+                }
+            }
         }
-      }
     }
 
     mfrc522[reader].PICC_HaltA();  // Halt the card
 }
+
 
 
 void sendData() {
@@ -446,8 +451,11 @@ void loop() {
     // Check if a new card is present
     if (!mfrc522[reader].PICC_IsNewCardPresent()) {
       if (currentTime - lastPollTime[reader] >= pollInterval) {
-        pollPres(reader);  // Poll for presence
-        lastPollTime[reader] = currentTime;
+        // Skip polling if the last state change was a removal
+        if (!lastChangeWasRemoval[reader]) {
+          pollPres(reader);  // Poll for presence
+          lastPollTime[reader] = currentTime;
+        }
       }
     } else if (mfrc522[reader].PICC_ReadCardSerial()) {  // Read the card's UID
       char uidBuffer[BUFFER_SIZE] = "";  // Buffer for UID
@@ -462,12 +470,15 @@ void loop() {
 
       // Update the reader state
       strcpy(state[reader], uidBuffer);
-      
+
       // Print state array
       printStateArray();
 
       // Send data
       sendData();
+
+      // Mark the last change as a detection
+      lastChangeWasRemoval[reader] = false;
 
       // Halt and stop encryption
       mfrc522[reader].PICC_HaltA();
@@ -475,4 +486,5 @@ void loop() {
     }
   }
 }
+
 
